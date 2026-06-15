@@ -29,6 +29,7 @@ import Suppliers from "./pages/Suppliers";
 import Automations from "./pages/Automations";
 import Debug from "./pages/Debug";
 import PublicQuote from "./pages/PublicQuote";
+import ElyonCatalog from "./pages/ElyonCatalog.tsx";
 const queryClient = new QueryClient();
 
 const protect = (el: React.ReactNode) => <ProtectedRoute>{el}</ProtectedRoute>;
@@ -64,6 +65,7 @@ const App = () => (
             <Route path="/fornecedores" element={protect(<Suppliers />)} />
             <Route path="/automacoes" element={protect(<Automations />)} />
             <Route path="/debug" element={<Debug />} />
+            <Route path="/catalogo" element={<ElyonCatalog />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
