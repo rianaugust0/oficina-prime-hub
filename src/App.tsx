@@ -6,15 +6,18 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Index from "./pages/Index.tsx";
+import Terms from "./pages/Terms.tsx";
+import Privacy from "./pages/Privacy.tsx";
 import Login from "./pages/Login.tsx";
 import Signup from "./pages/Signup.tsx";
 import ResetPassword from "./pages/ResetPassword.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import Clients from "./pages/Clients.tsx";
 import Vehicles from "./pages/Vehicles.tsx";
-import Orders from "./pages/Orders.tsx";
+import Orders from "./pages/Orders";
 import Schedule from "./pages/Schedule.tsx";
-import Financial from "./pages/Financial.tsx";
+import Finance from "./pages/Finance";
+import WorkshopSettings from "./pages/WorkshopSettings";
 import Reports from "./pages/Reports.tsx";
 import Notifications from "./pages/Notifications.tsx";
 import Settings from "./pages/Settings.tsx";
@@ -27,8 +30,10 @@ import Inventory from "./pages/Inventory";
 import Quotes from "./pages/Quotes";
 import Suppliers from "./pages/Suppliers";
 import Automations from "./pages/Automations";
+import Subscription from "./pages/Subscription";
 import Debug from "./pages/Debug";
 import PublicQuote from "./pages/PublicQuote";
+import Invoices from "./pages/Invoices";
 import ElyonCatalog from "./pages/ElyonCatalog.tsx";
 const queryClient = new QueryClient();
 
@@ -42,7 +47,10 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
+            {/* Rotas Públicas */}
             <Route path="/" element={<Index />} />
+            <Route path="/termos" element={<Terms />} />
+            <Route path="/privacidade" element={<Privacy />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/portal/os/:id" element={<ClientPortal />} />
@@ -51,10 +59,10 @@ const App = () => (
             <Route path="/dashboard" element={protect(<Dashboard />)} />
             <Route path="/clientes" element={protect(<Clients />)} />
             <Route path="/veiculos" element={protect(<Vehicles />)} />
+            <Route path="/financeiro" element={protect(<Finance />)} />
             <Route path="/ordens" element={protect(<Orders />)} />
             <Route path="/agenda" element={protect(<Schedule />)} />
             <Route path="/estoque" element={protect(<Inventory />)} />
-            <Route path="/financeiro" element={protect(<Financial />)} />
             <Route path="/relatorios" element={protect(<Reports />)} />
             <Route path="/notificacoes" element={protect(<Notifications />)} />
             <Route path="/configuracoes" element={protect(<Settings />)} />
@@ -64,6 +72,8 @@ const App = () => (
             <Route path="/orcamentos" element={protect(<Quotes />)} />
             <Route path="/fornecedores" element={protect(<Suppliers />)} />
             <Route path="/automacoes" element={protect(<Automations />)} />
+            <Route path="/assinatura" element={protect(<Subscription />)} />
+            <Route path="/notas-fiscais" element={protect(<Invoices />)} />
             <Route path="/debug" element={<Debug />} />
             <Route path="/catalogo" element={<ElyonCatalog />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, Plus, Loader2, MessageCircle, Trash2, Clock, CheckCircle2, Circle, Pencil, PlusCircle, Calculator, Link2, MoreHorizontal, FileText, ArrowRight, Printer } from "lucide-react";
+import { ClipboardList, Plus, Loader2, MessageCircle, Trash2, Clock, CheckCircle2, Circle, Pencil, PlusCircle, Calculator, Link2, MoreHorizontal, FileText, ArrowRight, Printer, FileInput, Bot } from "lucide-react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Button } from "@/components/ui/button";
@@ -15,8 +15,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
+import { emitirNFSe } from "@/lib/asaas-nfse";
 import { useAuth } from "@/hooks/useAuth";
-import { openWhatsApp, WhatsAppTemplates } from "@/lib/whatsapp";
+import { openWhatsApp, WhatsAppTemplates, sendAutomatedWhatsApp } from "@/lib/whatsapp";
 import { enqueueAutomation } from "@/lib/automations";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -41,16 +42,19 @@ const checkAndDeductInventory = async (orderId: string, workshopId: string) => {
       .from("order_items")
       .select("*")
       .eq("order_id", orderId)
-      .eq("item_type", "peca");
+      .eq("item_type", "peca")
+      .not("inventory_id", "is", null);
 
     if (!items || items.length === 0) return;
 
     for (const item of items) {
+      if (!item.inventory_id) continue;
+
       const { data: invItems } = await supabase
         .from("inventory")
         .select("id, current_stock, name")
         .eq("workshop_id", workshopId)
-        .ilike("name", item.name)
+        .eq("id", item.inventory_id)
         .limit(1);
 
       if (invItems && invItems.length > 0) {
@@ -253,7 +257,7 @@ export default function Orders() {
       
       // Auto Deduct Stock
       if (payload.status === "pronto" || payload.status === "entregue") {
-        await checkAndDeductInventory(currentOrderId);
+        await checkAndDeductInventory(currentOrderId!, workshopId!);
       }
     },
     onSuccess: () => {
@@ -279,20 +283,42 @@ export default function Orders() {
       if (status === "pronto" || status === "entregue") {
          await checkAndDeductInventory(order.id, order.workshop_id);
       }
-      return { order, status };
+
+      let wppStatus = 'disconnected';
+      // Simulação Robô de WhatsApp movida para o Backend
+      if (status === "pronto") {
+        const { data: wpp } = await supabase.from("workshop_whatsapp_config").select("status").eq("workshop_id", order.workshop_id).maybeSingle();
+        wppStatus = wpp?.status || 'disconnected';
+        if (wppStatus === 'connected' && order.clients?.phone) {
+          try {
+            const clientName = order.clients.name || "Cliente";
+            const vehicleStr = `${order.vehicles?.brand || ''} ${order.vehicles?.model || ''}`.trim() || "veículo";
+            const plateStr = order.vehicles?.plate || "S/ Placa";
+            const message = WhatsAppTemplates.orderReady(clientName, vehicleStr, plateStr);
+            
+            await sendAutomatedWhatsApp(order.clients.phone, message);
+            toast.success(`Mensagem de WhatsApp enviada automaticamente pelo Servidor para a OS #${order.number}!`, { duration: 5000, icon: <Bot className="h-4 w-4 text-emerald-500" /> });
+          } catch (e) {
+             console.error("Falha ao enviar whatsapp auto", e);
+          }
+        }
+      }
+      return { order, status, wppStatus };
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["orders"] });
       qc.invalidateQueries({ queryKey: ["clients"] });
       qc.invalidateQueries({ queryKey: ["dashboard-stats-full"] });
       
-      const { order, status } = data;
+      const { order, status, wppStatus } = data;
       const clientName = order.clients?.name || "Cliente";
       const clientPhone = order.clients?.phone;
       const vehicleStr = `${order.vehicles?.brand || ''} ${order.vehicles?.model || ''}`.trim() || "veículo";
       const plateStr = order.vehicles?.plate || "S/ Placa";
 
-      if (status === "pronto" && clientPhone) {
+      if (wppStatus === 'connected' && status === "pronto") {
+        // Toast is already handled in mutationFn for automatic sending
+      } else if (status === "pronto" && clientPhone) {
         toast.success(`Veículo pronto! Avisar ${clientName}?`, {
           duration: 10000,
           action: {
@@ -316,16 +342,32 @@ export default function Orders() {
   });
 
   const togglePaidMut = useMutation({
-    mutationFn: async ({ id, paid }: { id: string; paid: boolean }) => {
+    mutationFn: async ({ order, paid }: { order: any; paid: boolean }) => {
       const payload = { paid, paid_at: paid ? new Date().toISOString() : null };
-      const { error } = await supabase.from("orders").update(payload).eq("id", id);
+      const { error } = await supabase.from("orders").update(payload).eq("id", order.id);
       if (error) throw error;
+      
+      if (paid) {
+        const vehicleStr = `${order.vehicles?.brand || ''} ${order.vehicles?.model || ''}`.trim() || 'Veículo';
+        await supabase.from("transactions").insert({
+          workshop_id: order.workshop_id,
+          type: "receita",
+          category: "servico",
+          description: `OS #${String(order.number).padStart(4, "0")} - ${vehicleStr}`,
+          amount: order.amount || 0,
+          date: new Date().toISOString().split('T')[0],
+          status: "pago",
+          order_id: order.id
+        });
+      } else {
+        await supabase.from("transactions").delete().eq("order_id", order.id);
+      }
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ["orders"] });
       qc.invalidateQueries({ queryKey: ["dashboard-stats-full"] });
-      qc.invalidateQueries({ queryKey: ["financial-orders"] });
-      toast.success(vars.paid ? "OS Marcada como Paga." : "OS Marcada como Pendente.");
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      toast.success(vars.paid ? "OS Marcada como Paga. Receita gerada!" : "OS Marcada como Pendente. Receita removida.");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -341,6 +383,33 @@ export default function Orders() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const handleEmitNfe = async (orderId: string) => {
+    toast.promise(
+      async () => {
+        const order = orders?.find((o: any) => o.id === orderId);
+        if (!order) throw new Error("Ordem não encontrada");
+        
+        // Em produção, buscaríamos o walletId da workshop_fiscal_config
+        const mockWalletId = "wallet_xyz123";
+        const total = items.reduce((acc, i) => acc + (i.price * i.quantity), 0) - (Number(form.discount) || 0);
+
+        await emitirNFSe(mockWalletId, {
+          customerId: order.client_id,
+          totalValue: total,
+          orderId: order.id
+        });
+        
+        // Simular tempo de processamento
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      },
+      {
+        loading: 'Conectando ao sistema fiscal (Asaas Homologação)...',
+        success: 'Nota Fiscal emitida com sucesso! (Sandbox)',
+        error: 'Erro ao emitir nota'
+      }
+    );
+  };
 
   const handlePrint = (o: any, type: "os"|"quote"|"receipt" = "os") => {
     setPrintOrder({order: o, type});
@@ -520,10 +589,10 @@ export default function Orders() {
                                     variant="default" 
                                     size="sm" 
                                     className={cn("h-7 px-3 text-xs font-bold tracking-wider rounded-md shadow-md transition-all hover:-translate-y-0.5", o.paid ? "bg-emerald-500 hover:bg-emerald-600 text-white" : "bg-orange-500 hover:bg-orange-600 text-white")}
-                                    onClick={() => togglePaidMut.mutate({ id: o.id, paid: !o.paid })}
+                                    onClick={() => togglePaidMut.mutate({ order: o, paid: !o.paid })}
                                     title="Clique para alterar entre PAGO e PENDENTE"
                                   >
-                                    {o.paid ? "✓ PAGO" : "⏳ PENDENTE"}
+                                    {o.paid ? "✓ PAGO" : "⚠ PENDENTE"}
                                   </Button>
                                 </div>
                               </TableCell>
@@ -748,9 +817,14 @@ export default function Orders() {
                 <DialogFooter className="p-6 bg-background border-t border-border/40 z-10 flex justify-end gap-3">
                   <Button variant="ghost" onClick={() => setOpen(false)} className="px-6">Cancelar</Button>
                   {editingId && (
-                    <Button variant="outline" onClick={() => handlePrint({ ...form, id: editingId, discount: Number(form.discount || 0), number: (orders?.find((o:any) => o.id === editingId) as any)?.number, clients: clients?.find((c:any) => c.id === form.client_id), vehicles: vehicles?.find((v:any) => v.id === form.vehicle_id), order_items: items, amount: total }, "os")} className="px-6 border-border hover:bg-secondary">
-                      <Printer className="h-4 w-4 mr-2" /> Imprimir
-                    </Button>
+                    <>
+                      <Button variant="outline" onClick={() => handleEmitNfe(editingId)} className="px-6 border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10">
+                        <FileText className="h-4 w-4 mr-2" /> Emitir Nota
+                      </Button>
+                      <Button variant="outline" onClick={() => handlePrint({ ...form, id: editingId, discount: Number(form.discount || 0), number: (orders?.find((o:any) => o.id === editingId) as any)?.number, clients: clients?.find((c:any) => c.id === form.client_id), vehicles: vehicles?.find((v:any) => v.id === form.vehicle_id), order_items: items, amount: total }, "os")} className="px-6 border-border hover:bg-secondary">
+                        <Printer className="h-4 w-4 mr-2" /> Imprimir
+                      </Button>
+                    </>
                   )}
                   <Button variant="hero" onClick={() => upsertMut.mutate()} disabled={!form.client_id || !form.vehicle_id || upsertMut.isPending} className="px-8 shadow-md">
                     {upsertMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : (editingId ? "Salvar Alterações" : "Emitir Ordem de Serviço")}
